@@ -1,0 +1,57 @@
+#!/bin/bash
+USER_DATA="user-data"
+TEMPLATE="default.qcow2"
+
+while getopts "n:m:s:u:t:" opt; do
+	case "$opt" in
+		n)
+			NAME="$OPTARG" # Name of the VM
+			;;
+		m)
+			MEMORY="$OPTARG"
+			;;
+		s)
+			SIZE="$OPTARG" # Size in GB
+			;;
+		u)
+			USER_DATA="$OPTARG"
+			;;
+		t)
+			TEMPLATE="$OPTARG"
+			;;
+	esac
+done
+
+## Remove the arguments we just processed
+shift $((OPTIND-1))
+
+if [ -z "$NAME" ]; then
+	echo "Provide a name"
+	exit 1
+fi
+
+TEMP_META_DATA="temp/$NAME-meta-data"
+TEMP_IMAGE="temp/$NAME.qcow2"
+NEW_IMAGE="/var/lib/libvirt/images/$NAME.qcow2"
+
+# Check the image doesn't already exist
+echo "Checking if image exists"
+sudo virsh vol-name "$NEW_IMAGE" && echo "'$NEW_IMAGE' already exists!" && exit 1
+
+# Copy and resize the template image
+echo "Copying $TEMPLATE -> $TEMP_IMAGE and resizing"
+cp "images/$TEMPLATE" "$TEMP_IMAGE"
+qemu-img resize -f qcow2 "$TEMP_IMAGE" "${SIZE}G"
+echo "Moving $TEMP_IMAGE -> $NEW_IMAGE"
+sudo mv "$TEMP_IMAGE" "$NEW_IMAGE"
+
+echo "Creating meta-data ($TEMP_META_DATA)"
+echo "local-hostname: $NAME" > "$TEMP_META_DATA"
+
+sudo virt-install --name "$NAME" \
+	--memory "$MEMORY" \
+	--disk "$NEW_IMAGE" \
+	--osinfo linux2022 \
+	--cloud-init user-data="$USER_DATA",meta-data="$TEMP_META_DATA" \
+	--import \
+	--noautoconsole
